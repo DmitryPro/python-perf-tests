@@ -19,19 +19,11 @@ def fibonacci(n: int) -> int:
     return b
 
 def fibonacci2(n: int) -> int:
-    """Compute the nth Fibonacci number using an recursive algorithm."""
+    """Compute the nth Fibonacci number using an recurcive algorithm."""
     if n <= 1:
         return n
     else:
-        return fibonacci2(n - 1) + fibonacci2(n - 2)
-
-def bubble(n):
-    arr = [random.randint(0, n - 1) for _ in range(n)]
-    for i in range(n):
-        for j in range(0, n-i-1):
-            if arr[j] > arr[j+1]:
-                arr[j], arr[j+1] = arr[j+1], arr[j]
-    return arr
+        return fibonacci2(n-1) + fibonacci2(n-2)
 
 
 def prime_sieve(limit: int) -> List[int]:
@@ -67,4 +59,4 @@ def parse_and_serialize_json(payload_size: int) -> int:
     return len(decoded["nested"]["b"])
 
 
-__all__ = ["fibonacci", "prime_sieve", "parse_and_serialize_json", "bubble", "fibonacci2"]
+__all__ = ["fibonacci", "prime_sieve", "parse_and_serialize_json", "fibonacci2"]

@@ -9,9 +9,8 @@ import statistics
 import timeit
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
-import random
 
-from .compute import fibonacci, parse_and_serialize_json, prime_sieve, fibonacci2, bubble
+from .compute import fibonacci, parse_and_serialize_json, prime_sieve, fibonacci2
 
 # Shared sink to ensure that benchmark results are observable and cannot be
 # optimized away by the interpreter.
@@ -38,10 +37,9 @@ def _wrap(func: BenchmarkFunc) -> BenchmarkFunc:
 def _benchmark_cases() -> List[Tuple[str, BenchmarkFunc]]:
     return [
         ("fibonacci_40", lambda: fibonacci(40)),
-        ("fibonacci_recursive_40", lambda: fibonacci2(40)),
+        ("fibonacci_rec_32", lambda: fibonacci2(32)),
         ("prime_sieve_5000", lambda: len(prime_sieve(5000))),
-        # ("json_roundtrip_500", lambda: parse_and_serialize_json(500)),
-        ("bubble_10000", lambda: bubble(10000)),
+        ("json_roundtrip_500", lambda: parse_and_serialize_json(500)),
     ]
 
 
@@ -56,14 +54,20 @@ def run_benchmarks(iterations: int = 10, repeat: int = 5) -> Dict[str, object]:
         timer = timeit.Timer(_wrap(func))
         runs = timer.repeat(repeat, number=iterations)
         per_iteration = [duration / float(iterations) for duration in runs]
-        mean = statistics.mean(per_iteration)
-        stdev = statistics.pstdev(per_iteration) if len(per_iteration) > 1 else 0.0
+        mean = statistics.mean(runs)
+        stdev = statistics.pstdev(runs) if len(runs) > 1 else 0.0
+        per_iteration_mean = statistics.mean(per_iteration)
+        per_iteration_stdev = (
+            statistics.pstdev(per_iteration) if len(per_iteration) > 1 else 0.0
+        )
         results.append(
             {
                 "name": name,
-                "runs": per_iteration,
+                "runs": runs,
                 "mean": mean,
                 "stdev": stdev,
+                "per_iteration_mean": per_iteration_mean,
+                "per_iteration_stdev": per_iteration_stdev,
             }
         )
 

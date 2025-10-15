@@ -329,6 +329,8 @@ def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
             results.append(
                 {
                     "python_version": payload.get("python_version", "unknown"),
+                    "iterations": payload.get("iterations"),
+                    "repeat": payload.get("repeat"),
                     "mean": case_data.get("mean") if case_data else None,
                     "stdev": case_data.get("stdev") if case_data else None,
                 }
@@ -339,17 +341,25 @@ def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
 
 
 def _format_summary(summary: dict) -> str:
-    lines = ["Aggregate benchmark results (mean ± stdev seconds per iteration):"]
+    lines = ["Aggregate benchmark results (mean ± stdev seconds per run):"]
     for case in summary.get("cases", []):
         lines.append(f"- {case['name']}")
         for entry in case.get("results", []):
             version = entry.get("python_version", "unknown")
             mean = entry.get("mean")
             stdev = entry.get("stdev")
+            iterations = entry.get("iterations")
+            repeat = entry.get("repeat")
             if mean is None:
                 lines.append(f"    {version}: no data")
             else:
-                lines.append(f"    {version}: {mean:.6f}s ± {stdev:.6f}s")
+                meta_parts = []
+                if isinstance(iterations, int):
+                    meta_parts.append(f"{iterations} iterations")
+                if isinstance(repeat, int):
+                    meta_parts.append(f"{repeat} repeats")
+                meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
+                lines.append(f"    {version}{meta}: {mean:.6f}s ± {stdev:.6f}s total")
     if not summary.get("cases"):
         lines.append("(no benchmark cases found)")
     return "\n".join(lines)

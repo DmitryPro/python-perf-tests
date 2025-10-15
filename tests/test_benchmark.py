@@ -17,9 +17,18 @@ def test_run_benchmarks_structure(tmp_path: Path) -> None:
     assert len(payload["cases"]) == 3
 
     for case in payload["cases"]:
-        assert set(case.keys()) == {"name", "runs", "mean", "stdev"}
+        assert set(case.keys()) == {
+            "name",
+            "runs",
+            "mean",
+            "stdev",
+            "per_iteration_mean",
+            "per_iteration_stdev",
+        }
         assert len(case["runs"]) == 2
         assert all(run >= 0 for run in case["runs"])
+        assert case["mean"] >= 0
+        assert case["per_iteration_mean"] >= 0
 
     output_file = tmp_path / "result.json"
     exit_code = benchmark.main(["--iterations", "1", "--repeat", "1", "--output", str(output_file)])

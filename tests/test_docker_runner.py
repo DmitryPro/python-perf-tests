@@ -156,13 +156,25 @@ def test_summarize_results(tmp_path: Path) -> None:
     results_dir.mkdir()
     payload = {
         "python_version": "3.11.7",
+        "iterations": 10,
+        "repeat": 5,
         "cases": [
-            {"name": "case1", "mean": 0.1, "stdev": 0.01},
-            {"name": "case2", "mean": 0.2, "stdev": 0.02},
+            {
+                "name": "case1",
+                "mean": 0.1,
+                "stdev": 0.01,
+            },
+            {
+                "name": "case2",
+                "mean": 0.2,
+                "stdev": 0.02,
+            },
         ],
     }
     payload2 = {
         "python_version": "3.12.1",
+        "iterations": 12,
+        "repeat": 4,
         "cases": [
             {"name": "case1", "mean": 0.09, "stdev": 0.005},
         ],
@@ -174,9 +186,13 @@ def test_summarize_results(tmp_path: Path) -> None:
     assert summary_text is not None
     assert "case1" in summary_text
     assert "3.11.7" in summary_text
+    assert "total" in summary_text
     summary_payload = json.loads((results_dir / "summary.json").read_text())
     assert summary_payload["python_versions"] == ["3.11.7", "3.12.1"]
     assert summary_payload["cases"][0]["name"] == "case1"
+    first_result = summary_payload["cases"][0]["results"][0]
+    assert first_result["iterations"] == 10
+    assert first_result["repeat"] == 5
 
 
 def test_summarize_results_handles_missing(tmp_path: Path) -> None:
