@@ -51,6 +51,63 @@ def test_execute_runs_build_and_run(monkeypatch: pytest.MonkeyPatch, docker_tree
     assert len(build_commands) == 2
 
 
+def test_execute_resets_results_dir(
+    monkeypatch: pytest.MonkeyPatch, docker_tree: Path, tmp_path: Path
+) -> None:
+    commands = []
+
+    def fake_run(command, dry_run=False):
+        commands.append((tuple(command), dry_run))
+
+    monkeypatch.setattr(docker_runner, "run_command", fake_run)
+
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    (results_dir / "stale.json").write_text("{}")
+    nested = results_dir / "nested"
+    nested.mkdir()
+    (nested / "artifact.txt").write_text("data")
+
+    docker_runner.execute(
+        context=docker_tree.parent,
+        docker_root=docker_tree,
+        results_dir=results_dir,
+        aggregate=False,
+        skip_build=True,
+    )
+
+    assert results_dir.exists()
+    assert list(results_dir.iterdir()) == []
+
+
+def test_execute_keeps_results_dir_on_dry_run(
+    monkeypatch: pytest.MonkeyPatch, docker_tree: Path, tmp_path: Path
+) -> None:
+    commands = []
+
+    def fake_run(command, dry_run=False):
+        commands.append((tuple(command), dry_run))
+
+    monkeypatch.setattr(docker_runner, "run_command", fake_run)
+
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    stale_file = results_dir / "stale.json"
+    stale_file.write_text("{}")
+
+    docker_runner.execute(
+        context=docker_tree.parent,
+        docker_root=docker_tree,
+        results_dir=results_dir,
+        aggregate=False,
+        dry_run=True,
+    )
+
+    assert results_dir.exists()
+    assert stale_file.exists()
+    assert stale_file.read_text() == "{}"
+
+
 def test_main_supports_run_cmd(monkeypatch: pytest.MonkeyPatch, docker_tree: Path) -> None:
     commands = []
 
@@ -155,6 +212,7 @@ def test_summarize_results(tmp_path: Path) -> None:
     results_dir = tmp_path / "results"
     results_dir.mkdir()
     payload = {
+        "python_implementation": "CPython",
         "python_version": "3.11.7",
         "iterations": 10,
         "repeat": 5,
@@ -172,6 +230,7 @@ def test_summarize_results(tmp_path: Path) -> None:
         ],
     }
     payload2 = {
+        "python_implementation": "PyPy",
         "python_version": "3.12.1",
         "iterations": 12,
         "repeat": 4,
@@ -179,20 +238,26 @@ def test_summarize_results(tmp_path: Path) -> None:
             {"name": "case1", "mean": 0.09, "stdev": 0.005},
         ],
     }
-    (results_dir / "benchmarks-python-3.11.7.json").write_text(json.dumps(payload))
-    (results_dir / "benchmarks-python-3.12.1.json").write_text(json.dumps(payload2))
+    (results_dir / "benchmarks-cpython-3.11.7.json").write_text(json.dumps(payload))
+    (results_dir / "benchmarks-pypy-3.12.1.json").write_text(json.dumps(payload2))
 
     summary_text = docker_runner.summarize_results(results_dir)
     assert summary_text is not None
     assert "case1" in summary_text
-    assert "3.11.7" in summary_text
+    assert "CPython 3.11.7" in summary_text
     assert "total" in summary_text
     summary_payload = json.loads((results_dir / "summary.json").read_text())
     assert summary_payload["python_versions"] == ["3.11.7", "3.12.1"]
+    assert summary_payload["python_implementations"] == ["CPython", "PyPy"]
+    assert summary_payload["python_runtimes"] == [
+        {"python_implementation": "CPython", "python_version": "3.11.7"},
+        {"python_implementation": "PyPy", "python_version": "3.12.1"},
+    ]
     assert summary_payload["cases"][0]["name"] == "case1"
     first_result = summary_payload["cases"][0]["results"][0]
     assert first_result["iterations"] == 10
     assert first_result["repeat"] == 5
+    assert first_result["python_implementation"] == "CPython"
 
 
 def test_summarize_results_handles_missing(tmp_path: Path) -> None:

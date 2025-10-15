@@ -1,14 +1,14 @@
 # python-perf-tests
 
 Набор микробенчмарков, предназначенных для сравнения производительности разных
-версий Python (3.7–3.14) на одном и том же коде. Репозиторий содержит
+версий Python (3.7–3.14) и PyPy 3.11 на одном и том же коде. Репозиторий содержит
 унифицированные Dockerfile для каждой версии и тесты, проверяющие корректность
 бенчмарков.
 
 ## Структура
 
 - `benchmarks/compute.py` — набор задач для измерений: численные расчёты,
-  поиск простых чисел и JSON round-trip.
+  поиск простых чисел, пузырьковая сортировка и JSON round-trip.
 - `benchmarks/benchmark.py` — запускает задачи через `timeit` и сохраняет
   агрегированные результаты в JSON. Для каждого кейса записывается полное
   время каждого повтора (`runs`), среднее и стандартное отклонение по суммарному
@@ -27,10 +27,13 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```
 
 После запуска `benchmarks.benchmark` результаты будут сохранены в каталоге
-`results/` с указанием версии Python в названии файла. Каждое значение в блоке
-`runs` соответствует общему времени выполнения всех итераций в рамках повтора.
-Агрегированный файл `summary.json` с человекочитаемой сводкой создаётся
-утилитой `benchmarks.docker_runner`.
+`results/` в файле вида `benchmarks-<интерпретатор>-<версия>.json`, например
+`benchmarks-cpython-3.11.7.json` или `benchmarks-pypy-3.11.0.json`. Каждое
+значение в блоке `runs` соответствует общему времени выполнения всех итераций
+в рамках повтора, а в корне JSON теперь присутствуют поля
+`python_implementation` и `python_version`, чтобы отличать CPython и PyPy с
+одинаковыми версиями языка. Агрегированный файл `summary.json` с
+человекочитаемой сводкой создаётся утилитой `benchmarks.docker_runner`.
 
 ## Docker-образы
 
@@ -39,28 +42,37 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```bash
 # Пример для Python 3.11
 docker build -f docker/py3.11/Dockerfile -t python-perf:3.11 .
+
+# Пример для PyPy 3.11
+docker build -f docker/pypy3.11/Dockerfile -t python-perf:pypy3.11 .
 ```
 
 Запуск бенчмарка в контейнере:
 
 ```bash
 docker run --rm python-perf:3.11
+
+# Запуск бенчмарка под PyPy
+docker run --rm python-perf:pypy3.11
 ```
 
 Для запуска тестов вместо бенчмарка переопределите команду:
 
 ```bash
 docker run --rm python-perf:3.11 python -m pytest -q
+
+# Запуск тестов внутри PyPy-контейнера
+docker run --rm python-perf:pypy3.11 pypy3 -m pytest -q
 ```
 
-Аналогичные команды работают для остальных версий (3.7–3.14).
+Аналогичные команды работают для остальных версий (3.7–3.14) и PyPy 3.11.
 
 ## Автоматическая сборка и запуск всех контейнеров
 
 Чтобы собрать образы всех поддерживаемых версий Python и запустить бенчмарки,
 используйте вспомогательный скрипт. Он автоматически пробрасывает локальный
-каталог `results/` внутрь контейнеров, чтобы сохранить JSON с измерениями для
-каждой версии:
+каталог `results/` внутрь контейнеров, очищает его перед запуском и сохраняет
+JSON с измерениями для каждой версии:
 
 ```bash
 python -m benchmarks.docker_runner
@@ -93,14 +105,14 @@ python -m benchmarks.docker_runner --dry-run
 ```
 
 Набор микробенчмарков, предназначенных для сравнения производительности разных
-версий Python (3.7–3.14) на одном и том же коде. Репозиторий содержит
+версий Python (3.7–3.14) и PyPy 3.11 на одном и том же коде. Репозиторий содержит
 унифицированные Dockerfile для каждой версии и тесты, проверяющие корректность
 бенчмарков.
 
 ## Структура
 
 - `benchmarks/compute.py` — набор задач для измерений: численные расчёты,
-  поиск простых чисел и JSON round-trip.
+  поиск простых чисел, пузырьковая сортировка и JSON round-trip.
 - `benchmarks/benchmark.py` — запускает задачи через `timeit` и сохраняет
   агрегированные результаты в JSON.
 - `tests/` — pytests, валидирующие интерфейс и поведение бенчмарков.
@@ -117,8 +129,9 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```
 
 После запуска `benchmarks.benchmark` результаты будут сохранены в каталоге
-`results/` с указанием версии Python в названии файла, а агрегированный файл
-`summary.json` будет создан при помощи утилиты `benchmarks.docker_runner`.
+`results/` в файле вида `benchmarks-<интерпретатор>-<версия>.json`, например
+`benchmarks-cpython-3.11.7.json` или `benchmarks-pypy-3.11.0.json`. Агрегированный
+файл `summary.json` формируется утилитой `benchmarks.docker_runner`.
 
 ## Docker-образы
 
@@ -127,21 +140,30 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```bash
 # Пример для Python 3.11
 docker build -f docker/py3.11/Dockerfile -t python-perf:3.11 .
+
+# Пример для PyPy 3.11
+docker build -f docker/pypy3.11/Dockerfile -t python-perf:pypy3.11 .
 ```
 
 Запуск бенчмарка в контейнере:
 
 ```bash
 docker run --rm python-perf:3.11
+
+# Запуск бенчмарка под PyPy
+docker run --rm python-perf:pypy3.11
 ```
 
 Для запуска тестов вместо бенчмарка переопределите команду:
 
 ```bash
 docker run --rm python-perf:3.11 python -m pytest -q
+
+# Запуск тестов внутри PyPy-контейнера
+docker run --rm python-perf:pypy3.11 pypy3 -m pytest -q
 ```
 
-Аналогичные команды работают для остальных версий (3.7–3.14).
+Аналогичные команды работают для остальных версий (3.7–3.14) и PyPy 3.11.
 
 ## Автоматическая сборка и запуск всех контейнеров
 
@@ -179,7 +201,7 @@ python -m benchmarks.docker_runner --dry-run
 ```
 
 Набор микробенчмарков, предназначенных для сравнения производительности разных
-версий Python (3.7–3.14) на одном и том же коде. Репозиторий содержит
+версий Python (3.7–3.14) и PyPy 3.11 на одном и том же коде. Репозиторий содержит
 унифицированные Dockerfile для каждой версии и тесты, проверяющие корректность
 бенчмарков.
 
@@ -203,8 +225,9 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```
 
 После запуска `benchmarks.benchmark` результаты будут сохранены в каталоге
-`results/` с указанием версии Python в названии файла, а агрегированный файл
-`summary.json` будет создан при помощи утилиты `benchmarks.docker_runner`.
+`results/` в файле вида `benchmarks-<интерпретатор>-<версия>.json`, например
+`benchmarks-cpython-3.11.7.json` или `benchmarks-pypy-3.11.0.json`. Агрегированный
+файл `summary.json` формируется утилитой `benchmarks.docker_runner`.
 
 ## Docker-образы
 
@@ -213,21 +236,30 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```bash
 # Пример для Python 3.11
 docker build -f docker/py3.11/Dockerfile -t python-perf:3.11 .
+
+# Пример для PyPy 3.11
+docker build -f docker/pypy3.11/Dockerfile -t python-perf:pypy3.11 .
 ```
 
 Запуск бенчмарка в контейнере:
 
 ```bash
 docker run --rm python-perf:3.11
+
+# Запуск бенчмарка под PyPy
+docker run --rm python-perf:pypy3.11
 ```
 
 Для запуска тестов вместо бенчмарка переопределите команду:
 
 ```bash
 docker run --rm python-perf:3.11 python -m pytest -q
+
+# Запуск тестов внутри PyPy-контейнера
+docker run --rm python-perf:pypy3.11 pypy3 -m pytest -q
 ```
 
-Аналогичные команды работают для остальных версий (3.7–3.14).
+Аналогичные команды работают для остальных версий (3.7–3.14) и PyPy 3.11.
 
 ## Автоматическая сборка и запуск всех контейнеров
 
@@ -259,7 +291,7 @@ python -m benchmarks.docker_runner --dry-run
 ```
 
 Набор микробенчмарков, предназначенных для сравнения производительности разных
-версий Python (3.7–3.14) на одном и том же коде. Репозиторий содержит
+версий Python (3.7–3.14) и PyPy 3.11 на одном и том же коде. Репозиторий содержит
 унифицированные Dockerfile для каждой версии и тесты, проверяющие корректность
 бенчмарков.
 
@@ -283,7 +315,8 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```
 
 После запуска `benchmarks.benchmark` результаты будут сохранены в каталоге
-`results/` с указанием версии Python в названии файла.
+`results/` в файле вида `benchmarks-<интерпретатор>-<версия>.json`, например
+`benchmarks-cpython-3.11.7.json` или `benchmarks-pypy-3.11.0.json`.
 
 ## Docker-образы
 
@@ -292,21 +325,30 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```bash
 # Пример для Python 3.11
 docker build -f docker/py3.11/Dockerfile -t python-perf:3.11 .
+
+# Пример для PyPy 3.11
+docker build -f docker/pypy3.11/Dockerfile -t python-perf:pypy3.11 .
 ```
 
 Запуск бенчмарка в контейнере:
 
 ```bash
 docker run --rm python-perf:3.11
+
+# Запуск бенчмарка под PyPy
+docker run --rm python-perf:pypy3.11
 ```
 
 Для запуска тестов вместо бенчмарка переопределите команду:
 
 ```bash
 docker run --rm python-perf:3.11 python -m pytest -q
+
+# Запуск тестов внутри PyPy-контейнера
+docker run --rm python-perf:pypy3.11 pypy3 -m pytest -q
 ```
 
-Аналогичные команды работают для остальных версий (3.7–3.14).
+Аналогичные команды работают для остальных версий (3.7–3.14) и PyPy 3.11.
 
 ## Автоматическая сборка и запуск всех контейнеров
 
@@ -331,7 +373,7 @@ python -m benchmarks.docker_runner --dry-run
 ```
 
 Набор микробенчмарков, предназначенных для сравнения производительности разных
-версий Python (3.7–3.14) на одном и том же коде. Репозиторий содержит
+версий Python (3.7–3.14) и PyPy 3.11 на одном и том же коде. Репозиторий содержит
 унифицированные Dockerfile для каждой версии и тесты, проверяющие корректность
 бенчмарков.
 
@@ -355,7 +397,8 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```
 
 После запуска `benchmarks.benchmark` результаты будут сохранены в каталоге
-`results/` с указанием версии Python в названии файла.
+`results/` в файле вида `benchmarks-<интерпретатор>-<версия>.json`, например
+`benchmarks-cpython-3.11.7.json` или `benchmarks-pypy-3.11.0.json`.
 
 ## Docker-образы
 
@@ -364,18 +407,27 @@ python -m benchmarks.benchmark --iterations 5 --repeat 3
 ```bash
 # Пример для Python 3.11
 docker build -f docker/py3.11/Dockerfile -t python-perf:3.11 .
+
+# Пример для PyPy 3.11
+docker build -f docker/pypy3.11/Dockerfile -t python-perf:pypy3.11 .
 ```
 
 Запуск бенчмарка в контейнере:
 
 ```bash
 docker run --rm python-perf:3.11
+
+# Запуск бенчмарка под PyPy
+docker run --rm python-perf:pypy3.11
 ```
 
 Для запуска тестов вместо бенчмарка переопределите команду:
 
 ```bash
 docker run --rm python-perf:3.11 python -m pytest -q
+
+# Запуск тестов внутри PyPy-контейнера
+docker run --rm python-perf:pypy3.11 pypy3 -m pytest -q
 ```
 
-Аналогичные команды работают для остальных версий (3.7–3.14).
+Аналогичные команды работают для остальных версий (3.7–3.14) и PyPy 3.11.

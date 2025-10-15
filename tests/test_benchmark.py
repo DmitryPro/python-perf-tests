@@ -13,8 +13,9 @@ def test_run_benchmarks_structure(tmp_path: Path) -> None:
 
     assert payload["iterations"] == 1
     assert payload["repeat"] == 2
+    assert isinstance(payload["python_implementation"], str)
     assert isinstance(payload["python_version"], str)
-    assert len(payload["cases"]) == 3
+    assert len(payload["cases"]) == 5
 
     for case in payload["cases"]:
         assert set(case.keys()) == {
@@ -35,6 +36,7 @@ def test_run_benchmarks_structure(tmp_path: Path) -> None:
     assert exit_code == 0
     stored = json.loads(output_file.read_text())
     assert stored["iterations"] == 1
+    assert "python_implementation" in stored
 
 
 def test_invalid_arguments() -> None:

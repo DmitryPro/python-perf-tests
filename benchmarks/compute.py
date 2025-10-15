@@ -59,4 +59,24 @@ def parse_and_serialize_json(payload_size: int) -> int:
     return len(decoded["nested"]["b"])
 
 
-__all__ = ["fibonacci", "prime_sieve", "parse_and_serialize_json", "fibonacci2"]
+def bubble_sort(size: int) -> int:
+    """Sort a list of random integers using bubble sort and return the minimum."""
+    if size <= 0:
+        raise ValueError("size must be positive")
+
+    values = [random.randint(0, size) for _ in range(size)]
+    for i in range(len(values)):
+        for j in range(0, len(values) - i - 1):
+            if values[j] > values[j + 1]:
+                values[j], values[j + 1] = values[j + 1], values[j]
+
+    return values[0]
+
+
+__all__ = [
+    "fibonacci",
+    "prime_sieve",
+    "parse_and_serialize_json",
+    "fibonacci2",
+    "bubble_sort",
+]

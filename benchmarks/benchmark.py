@@ -10,7 +10,13 @@ import timeit
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
 
-from .compute import fibonacci, parse_and_serialize_json, prime_sieve, fibonacci2
+from .compute import (
+    bubble_sort,
+    fibonacci,
+    fibonacci2,
+    parse_and_serialize_json,
+    prime_sieve,
+)
 
 # Shared sink to ensure that benchmark results are observable and cannot be
 # optimized away by the interpreter.
@@ -40,6 +46,7 @@ def _benchmark_cases() -> List[Tuple[str, BenchmarkFunc]]:
         ("fibonacci_rec_32", lambda: fibonacci2(32)),
         ("prime_sieve_5000", lambda: len(prime_sieve(5000))),
         ("json_roundtrip_500", lambda: parse_and_serialize_json(500)),
+        ("bubble_sort_10000", lambda: bubble_sort(10000)),
     ]
 
 
@@ -48,6 +55,9 @@ def run_benchmarks(iterations: int = 10, repeat: int = 5) -> Dict[str, object]:
         raise ValueError("iterations must be positive")
     if repeat <= 0:
         raise ValueError("repeat must be positive")
+
+    implementation = platform.python_implementation()
+    version = platform.python_version()
 
     results = []
     for name, func in _benchmark_cases():
@@ -72,7 +82,8 @@ def run_benchmarks(iterations: int = 10, repeat: int = 5) -> Dict[str, object]:
         )
 
     return {
-        "python_version": platform.python_version(),
+        "python_implementation": implementation,
+        "python_version": version,
         "iterations": iterations,
         "repeat": repeat,
         "cases": results,
@@ -80,7 +91,9 @@ def run_benchmarks(iterations: int = 10, repeat: int = 5) -> Dict[str, object]:
 
 
 def _default_output_path() -> Path:
-    return Path("results") / f"benchmarks-python-{platform.python_version()}.json"
+    implementation = platform.python_implementation().lower()
+    version = platform.python_version()
+    return Path("results") / f"benchmarks-{implementation}-{version}.json"
 
 
 def main(args: Iterable[str] | None = None) -> int:

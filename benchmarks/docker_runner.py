@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -130,7 +131,10 @@ def execute(
     targets = discover_targets(docker_root)
 
     if results_dir is not None:
-        results_dir.mkdir(parents=True, exist_ok=True)
+        if dry_run or skip_run:
+            results_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            _reset_results_dir(results_dir)
 
     if run_cmd is not None:
         resolved_run_cmd = run_cmd
@@ -277,15 +281,31 @@ def summarize_results(results_dir: Path) -> str | None:
 
     sorted_payloads = sorted(
         payloads,
-        key=lambda payload: _version_key(payload.get("python_version", "")),
+        key=lambda payload: (
+            payload.get("python_implementation", ""),
+            _version_key(payload.get("python_version", "")),
+        ),
     )
     summary = _aggregate_payloads(sorted_payloads)
     (results_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     return _format_summary(summary)
 
 
+def _reset_results_dir(results_dir: Path) -> None:
+    """Remove all files/sub-directories under ``results_dir`` and recreate it."""
+
+    if results_dir.exists():
+        for entry in results_dir.iterdir():
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+
 def _load_payloads(results_dir: Path) -> Iterable[dict]:
-    pattern = "benchmarks-python-*.json"
+    pattern = "benchmarks-*.json"
     for path in sorted(results_dir.glob(pattern)):
         try:
             yield json.loads(path.read_text())
@@ -314,6 +334,9 @@ def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
                 seen_cases.add(name)
 
     versions = [payload.get("python_version", "unknown") for payload in payloads]
+    implementations = [
+        payload.get("python_implementation", "unknown") for payload in payloads
+    ]
     cases = []
     for case_name in case_order:
         results = []
@@ -328,6 +351,9 @@ def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
             )
             results.append(
                 {
+                    "python_implementation": payload.get(
+                        "python_implementation", "unknown"
+                    ),
                     "python_version": payload.get("python_version", "unknown"),
                     "iterations": payload.get("iterations"),
                     "repeat": payload.get("repeat"),
@@ -337,7 +363,20 @@ def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
             )
         cases.append({"name": case_name, "results": results})
 
-    return {"python_versions": versions, "cases": cases}
+    runtimes = [
+        {
+            "python_implementation": impl,
+            "python_version": version,
+        }
+        for impl, version in zip(implementations, versions)
+    ]
+
+    return {
+        "python_versions": versions,
+        "python_implementations": implementations,
+        "python_runtimes": runtimes,
+        "cases": cases,
+    }
 
 
 def _format_summary(summary: dict) -> str:
@@ -345,13 +384,14 @@ def _format_summary(summary: dict) -> str:
     for case in summary.get("cases", []):
         lines.append(f"- {case['name']}")
         for entry in case.get("results", []):
+            implementation = entry.get("python_implementation", "unknown")
             version = entry.get("python_version", "unknown")
             mean = entry.get("mean")
             stdev = entry.get("stdev")
             iterations = entry.get("iterations")
             repeat = entry.get("repeat")
             if mean is None:
-                lines.append(f"    {version}: no data")
+                lines.append(f"    {implementation} {version}: no data")
             else:
                 meta_parts = []
                 if isinstance(iterations, int):
@@ -359,7 +399,9 @@ def _format_summary(summary: dict) -> str:
                 if isinstance(repeat, int):
                     meta_parts.append(f"{repeat} repeats")
                 meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
-                lines.append(f"    {version}{meta}: {mean:.6f}s ± {stdev:.6f}s total")
+                lines.append(
+                    f"    {implementation} {version}{meta}: {mean:.6f}s ± {stdev:.6f}s total"
+                )
     if not summary.get("cases"):
         lines.append("(no benchmark cases found)")
     return "\n".join(lines)
