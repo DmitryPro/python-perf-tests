@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import math
 import random
+from queue import SimpleQueue
+from threading import Thread
 from typing import List
 
 
@@ -73,10 +75,43 @@ def bubble_sort(size: int) -> int:
     return values[0]
 
 
+def threaded_trigonometry(workers: int, iterations: int) -> int:
+    """Coordinate several threads that perform trigonometric calculations."""
+
+    if workers <= 0:
+        raise ValueError("workers must be positive")
+    if iterations <= 0:
+        raise ValueError("iterations must be positive")
+
+    results: "SimpleQueue[float]" = SimpleQueue()
+
+    def worker(offset: int) -> None:
+        total = 0.0
+        for index in range(iterations):
+            angle = (offset + index) * 0.0003
+            total += math.sin(angle) * math.cos(angle * 0.5)
+        results.put(total)
+
+    threads = [
+        Thread(target=worker, args=(worker_id * iterations,), daemon=False)
+        for worker_id in range(workers)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    aggregate = 0.0
+    for _ in range(workers):
+        aggregate += results.get()
+    return int(aggregate * 1_000_000)
+
+
 __all__ = [
     "fibonacci",
     "prime_sieve",
     "parse_and_serialize_json",
     "fibonacci2",
     "bubble_sort",
+    "threaded_trigonometry",
 ]

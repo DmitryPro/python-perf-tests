@@ -213,7 +213,7 @@ def test_summarize_results(tmp_path: Path) -> None:
     results_dir.mkdir()
     payload = {
         "python_implementation": "CPython",
-        "python_version": "3.11.7",
+        "python_version": "3.14.0",
         "iterations": 10,
         "repeat": 5,
         "cases": [
@@ -238,19 +238,43 @@ def test_summarize_results(tmp_path: Path) -> None:
             {"name": "case1", "mean": 0.09, "stdev": 0.005},
         ],
     }
-    (results_dir / "benchmarks-cpython-3.11.7.json").write_text(json.dumps(payload))
+    payload3 = {
+        "python_implementation": "CPython",
+        "python_version": "3.11.7",
+        "iterations": 10,
+        "repeat": 5,
+        "cases": [
+            {"name": "case1", "mean": 0.12, "stdev": 0.015},
+        ],
+    }
+    payload4 = {
+        "python_implementation": "CPython",
+        "python_version": "3.14.0t",
+        "iterations": 10,
+        "repeat": 5,
+        "cases": [
+            {"name": "case1", "mean": 0.05, "stdev": 0.01},
+        ],
+    }
+    (results_dir / "benchmarks-cpython-3.14.0.json").write_text(json.dumps(payload))
     (results_dir / "benchmarks-pypy-3.12.1.json").write_text(json.dumps(payload2))
+    (results_dir / "benchmarks-cpython-3.11.7-alt.json").write_text(json.dumps(payload3))
+    (results_dir / "benchmarks-cpython-3.14.0t.json").write_text(json.dumps(payload4))
 
     summary_text = docker_runner.summarize_results(results_dir)
     assert summary_text is not None
     assert "case1" in summary_text
-    assert "CPython 3.11.7" in summary_text
+    assert "CPython 3.14.0" in summary_text
     assert "total" in summary_text
+    assert "faster vs CPython 3.14" in summary_text or "slower vs CPython 3.14" in summary_text
+    assert "CPython 3.14.0t" in summary_text
     summary_payload = json.loads((results_dir / "summary.json").read_text())
-    assert summary_payload["python_versions"] == ["3.11.7", "3.12.1"]
-    assert summary_payload["python_implementations"] == ["CPython", "PyPy"]
+    assert summary_payload["python_versions"] == ["3.11.7", "3.14.0", "3.14.0t", "3.12.1"]
+    assert summary_payload["python_implementations"] == ["CPython", "CPython", "CPython", "PyPy"]
     assert summary_payload["python_runtimes"] == [
         {"python_implementation": "CPython", "python_version": "3.11.7"},
+        {"python_implementation": "CPython", "python_version": "3.14.0"},
+        {"python_implementation": "CPython", "python_version": "3.14.0t"},
         {"python_implementation": "PyPy", "python_version": "3.12.1"},
     ]
     assert summary_payload["cases"][0]["name"] == "case1"
@@ -258,6 +282,30 @@ def test_summarize_results(tmp_path: Path) -> None:
     assert first_result["iterations"] == 10
     assert first_result["repeat"] == 5
     assert first_result["python_implementation"] == "CPython"
+    assert summary_payload["cases"][0]["results"][0]["relative_to_cpython_3_14"] is not None
+    relative_values = {
+        entry["python_version"]: entry["relative_to_cpython_3_14"]
+        for entry in summary_payload["cases"][0]["results"]
+    }
+    assert relative_values["3.14.0"] == pytest.approx(1.0)
+    assert relative_values["3.14.0t"] == pytest.approx(0.5)
+
+
+def test_baseline_mean_prefers_standard_gil_build() -> None:
+    results = [
+        {
+            "python_implementation": "CPython",
+            "python_version": "3.14.0t",
+            "mean": 0.05,
+        },
+        {
+            "python_implementation": "CPython",
+            "python_version": "3.14.0",
+            "mean": 0.1,
+        },
+    ]
+    baseline = docker_runner._baseline_mean(results)
+    assert baseline == pytest.approx(0.1)
 
 
 def test_summarize_results_handles_missing(tmp_path: Path) -> None:

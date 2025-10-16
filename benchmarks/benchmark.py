@@ -16,6 +16,7 @@ from .compute import (
     fibonacci2,
     parse_and_serialize_json,
     prime_sieve,
+    threaded_trigonometry,
 )
 
 # Shared sink to ensure that benchmark results are observable and cannot be
@@ -47,6 +48,7 @@ def _benchmark_cases() -> List[Tuple[str, BenchmarkFunc]]:
         ("prime_sieve_5000", lambda: len(prime_sieve(5000))),
         ("json_roundtrip_500", lambda: parse_and_serialize_json(500)),
         ("bubble_sort_10000", lambda: bubble_sort(10000)),
+        ("threaded_trig_4x20000", lambda: threaded_trigonometry(4, 20_000)),
     ]
 
 

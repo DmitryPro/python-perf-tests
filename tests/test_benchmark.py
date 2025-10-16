@@ -15,7 +15,17 @@ def test_run_benchmarks_structure(tmp_path: Path) -> None:
     assert payload["repeat"] == 2
     assert isinstance(payload["python_implementation"], str)
     assert isinstance(payload["python_version"], str)
-    assert len(payload["cases"]) == 5
+    assert len(payload["cases"]) == 6
+
+    case_names = {case["name"] for case in payload["cases"]}
+    assert {
+        "fibonacci_40",
+        "fibonacci_rec_32",
+        "prime_sieve_5000",
+        "json_roundtrip_500",
+        "bubble_sort_10000",
+        "threaded_trig_4x20000",
+    } == case_names
 
     for case in payload["cases"]:
         assert set(case.keys()) == {

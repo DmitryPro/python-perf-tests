@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import shlex
 import subprocess
@@ -18,6 +19,47 @@ from typing import Iterable, List, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCKER_ROOT = REPO_ROOT / "docker"
+
+
+
+def _baseline_mean(results: Sequence[dict]) -> float | None:
+    """Return the CPython 3.14 baseline mean, preferring GIL-enabled builds."""
+
+    def _matches(entry: dict) -> bool:
+        implementation = entry.get("python_implementation")
+        version = entry.get("python_version", "")
+        mean = entry.get("mean")
+        return (
+            implementation == "CPython"
+            and isinstance(version, str)
+            and version.startswith("3.14")
+            and isinstance(mean, (int, float))
+        )
+
+    def _is_thread_free(version: str) -> bool:
+        return version.lower().endswith("t")
+
+    candidates = [entry for entry in results if _matches(entry)]
+    for entry in candidates:
+        version = entry.get("python_version", "")
+        if isinstance(version, str) and not _is_thread_free(version):
+            return float(entry["mean"])
+
+    if candidates:
+        return float(candidates[0]["mean"])
+    return None
+
+
+def _format_relative(relative: float | None) -> str:
+    if relative is None:
+        return ""
+    if math.isclose(relative, 1.0, rel_tol=0.02):
+        return " [on par with CPython 3.14]"
+    if relative < 1.0:
+        faster = 1 / relative
+        return f" [{faster:.2f}x faster vs CPython 3.14]"
+    slower = relative
+    return f" [{slower:.2f}x slower vs CPython 3.14]"
 
 
 class DockerRunnerError(RuntimeError):
@@ -283,7 +325,7 @@ def summarize_results(results_dir: Path) -> str | None:
         payloads,
         key=lambda payload: (
             payload.get("python_implementation", ""),
-            _version_key(payload.get("python_version", "")),
+            _version_sort_key(payload.get("python_version", "")),
         ),
     )
     summary = _aggregate_payloads(sorted_payloads)
@@ -316,11 +358,24 @@ def _load_payloads(results_dir: Path) -> Iterable[dict]:
 def _version_key(version: str) -> Tuple[int, ...]:
     parts: List[int] = []
     for part in version.split("."):
-        try:
-            parts.append(int(part))
-        except ValueError:
+        digits = ""
+        for char in part:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        if digits:
+            parts.append(int(digits))
+        else:
+            break
+        if len(digits) != len(part):
             break
     return tuple(parts)
+
+
+def _version_sort_key(version: str) -> Tuple[Tuple[int, ...], int, str]:
+    variant_rank = 1 if version.lower().endswith("t") else 0
+    return (_version_key(version), variant_rank, version)
 
 
 def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
@@ -361,6 +416,14 @@ def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
                     "stdev": case_data.get("stdev") if case_data else None,
                 }
             )
+
+        baseline_mean = _baseline_mean(results)
+        for entry in results:
+            mean_value = entry.get("mean")
+            if baseline_mean is not None and mean_value is not None and baseline_mean > 0:
+                entry["relative_to_cpython_3_14"] = mean_value / baseline_mean
+            else:
+                entry["relative_to_cpython_3_14"] = None
         cases.append({"name": case_name, "results": results})
 
     runtimes = [
@@ -390,6 +453,8 @@ def _format_summary(summary: dict) -> str:
             stdev = entry.get("stdev")
             iterations = entry.get("iterations")
             repeat = entry.get("repeat")
+            relative = entry.get("relative_to_cpython_3_14")
+            relative_text = _format_relative(relative)
             if mean is None:
                 lines.append(f"    {implementation} {version}: no data")
             else:
@@ -400,7 +465,7 @@ def _format_summary(summary: dict) -> str:
                     meta_parts.append(f"{repeat} repeats")
                 meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
                 lines.append(
-                    f"    {implementation} {version}{meta}: {mean:.6f}s ± {stdev:.6f}s total"
+                    f"    {implementation} {version}{meta}: {mean:.6f}s ± {stdev:.6f}s total{relative_text}"
                 )
     if not summary.get("cases"):
         lines.append("(no benchmark cases found)")
@@ -409,3 +474,4 @@ def _format_summary(summary: dict) -> str:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
