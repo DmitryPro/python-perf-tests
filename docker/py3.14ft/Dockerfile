@@ -1,14 +1,12 @@
-FROM makukha/multipython
-
+FROM makukha/multipython:latest
 WORKDIR /app
 
-COPY requirements.txt ./
-RUN ln -sf /usr/local/bin/python3.14t /usr/local/bin/python && \
-    python -V && \
-    python -m pip install --upgrade pip && \
-    python -m pip install -r requirements.txt
+COPY requirements.txt .
+RUN python3.14t -m pip install --upgrade pip && \
+    python3.14t -m pip install --no-cache-dir -r requirements.txt
 
 COPY benchmarks ./benchmarks
 COPY tests ./tests
 
-CMD ["python", "-m", "benchmarks.benchmark", "--iterations", "10", "--repeat", "5"]
+# Запускаем без GIL
+CMD ["python", "-X", "gil=0", "-m", "benchmarks.benchmark", "--iterations", "10", "--repeat", "5"]

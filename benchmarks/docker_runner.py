@@ -15,10 +15,19 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCKER_ROOT = REPO_ROOT / "docker"
+
+
+def _default_results_dir_for_suite(suite: str) -> Path:
+    base = REPO_ROOT / "results"
+    if suite == "micro":
+        return base / "micro"
+    if suite == "concurrency":
+        return base / "concurrency"
+    raise DockerRunnerError(f"Unsupported benchmark suite '{suite}'")
 
 
 
@@ -214,7 +223,7 @@ def execute(
         and aggregate
         and results_dir is not None
     ):
-        summary_text = summarize_results(results_dir)
+        summary_text = summarize_results(results_dir, suite=suite)
         if summary_text:
             print(summary_text)
     return targets
@@ -267,8 +276,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--results-dir",
         type=Path,
-        default=REPO_ROOT / "results",
-        help="Directory on the host where benchmark results are stored",
+        default=None,
+        help=(
+            "Directory on the host where benchmark results are stored. "
+            "Defaults to a suite-specific directory under 'results/'."
+        ),
     )
     parser.add_argument(
         "--no-aggregate",
@@ -332,6 +344,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     try:
+        results_dir = (
+            args.results_dir
+            if args.results_dir is not None
+            else _default_results_dir_for_suite(args.suite)
+        )
         execute(
             context=args.context,
             docker_root=args.docker_root,
@@ -339,7 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             skip_run=args.skip_run,
             dry_run=args.dry_run,
             run_cmd=run_cmd,
-            results_dir=args.results_dir,
+            results_dir=results_dir,
             aggregate=not args.no_aggregate,
             iterations=args.iterations,
             repeat=args.repeat,
@@ -376,26 +393,40 @@ def _build_concurrency_commands(
     commands = []
 
     if python_version.startswith("3.14"):
-        commands.append(
-            [
-                "python",
-                "-m",
-                "benchmarks.concurrency",
-                *options,
-            ]
-        )
+        if "ft" in python_version:
+            commands.append(
+                [
+                    "python3.14t",
+                    "-m",
+                    "benchmarks.concurrency",
+                    *options,
+                ]
+            )
+        else:
+            commands.append(
+                [
+                    "python",
+                    "-m",
+                    "benchmarks.concurrency",
+                    *options,
+                ]
+            )
 
     return commands
 
 
-def summarize_results(results_dir: Path) -> str | None:
-    """Aggregate all benchmark JSON files and return a human-readable summary.
+def summarize_results(results_dir: Path, *, suite: str = "micro") -> str | None:
+    """Aggregate benchmark JSON files for ``suite`` and return a summary string."""
 
-    A ``summary.json`` file will also be written next to the inputs containing
-    structured data for further processing.
-    """
+    if suite == "micro":
+        return _summarize_micro_results(results_dir)
+    if suite == "concurrency":
+        return _summarize_concurrency_results(results_dir)
+    raise DockerRunnerError(f"Unsupported benchmark suite '{suite}'")
 
-    payloads = list(_load_payloads(results_dir))
+
+def _summarize_micro_results(results_dir: Path) -> str | None:
+    payloads = list(_load_micro_payloads(results_dir))
     if not payloads:
         return None
 
@@ -406,9 +437,20 @@ def summarize_results(results_dir: Path) -> str | None:
             _version_sort_key(payload.get("python_version", "")),
         ),
     )
-    summary = _aggregate_payloads(sorted_payloads)
+    summary = _aggregate_micro_payloads(sorted_payloads)
     (results_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-    return _format_summary(summary)
+    return _format_micro_summary(summary)
+
+
+def _summarize_concurrency_results(results_dir: Path) -> str | None:
+    payloads = list(_load_concurrency_payloads(results_dir))
+    if not payloads:
+        return None
+
+    sorted_payloads = sorted(payloads, key=_runtime_metadata_sort_key)
+    summary = _aggregate_concurrency_payloads(sorted_payloads)
+    (results_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    return _format_concurrency_summary(summary)
 
 
 def _reset_results_dir(results_dir: Path) -> None:
@@ -424,13 +466,22 @@ def _reset_results_dir(results_dir: Path) -> None:
     results_dir.mkdir(parents=True, exist_ok=True)
 
 
-def _load_payloads(results_dir: Path) -> Iterable[dict]:
+def _load_micro_payloads(results_dir: Path) -> Iterable[dict]:
     pattern = "benchmarks-*.json"
     for path in sorted(results_dir.glob(pattern)):
         try:
             yield json.loads(path.read_text())
         except json.JSONDecodeError:
             print(f"Warning: could not parse benchmark output '{path}'")
+
+
+def _load_concurrency_payloads(results_dir: Path) -> Iterable[dict]:
+    pattern = "concurrency-*.json"
+    for path in sorted(results_dir.glob(pattern)):
+        try:
+            yield json.loads(path.read_text())
+        except json.JSONDecodeError:
+            print(f"Warning: could not parse concurrency output '{path}'")
 
 
 def _version_key(version: str) -> Tuple[int, ...]:
@@ -456,7 +507,15 @@ def _version_sort_key(version: str) -> Tuple[Tuple[int, ...], int, str]:
     return (_version_key(version), variant_rank, version)
 
 
-def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
+def _runtime_metadata_sort_key(payload: dict) -> Tuple[str, Tuple[Tuple[int, ...], int, str], int, str]:
+    metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+    implementation = metadata.get("python_implementation", "")
+    version = metadata.get("python_version", "")
+    gil_rank = 1 if metadata.get("gil_disabled") is True else 0
+    return (implementation, _version_sort_key(version), gil_rank, str(version))
+
+
+def _aggregate_micro_payloads(payloads: Sequence[dict]) -> dict:
     case_order: List[str] = []
     seen_cases = set()
     for payload in payloads:
@@ -513,6 +572,7 @@ def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
     ]
 
     return {
+        "suite": "micro",
         "python_versions": versions,
         "python_implementations": implementations,
         "python_runtimes": runtimes,
@@ -520,7 +580,7 @@ def _aggregate_payloads(payloads: Sequence[dict]) -> dict:
     }
 
 
-def _format_summary(summary: dict) -> str:
+def _format_micro_summary(summary: dict) -> str:
     lines = ["Aggregate benchmark results (mean ± stdev seconds per run):"]
     for case in summary.get("cases", []):
         lines.append(f"- {case['name']}")
@@ -547,6 +607,162 @@ def _format_summary(summary: dict) -> str:
                 )
     if not summary.get("cases"):
         lines.append("(no benchmark cases found)")
+    return "\n".join(lines)
+
+
+def _aggregate_concurrency_payloads(payloads: Sequence[dict]) -> dict:
+    workload_order: List[str] = []
+    workload_metadata: Dict[str, Dict[str, object]] = {}
+    for payload in payloads:
+        for workload in payload.get("workloads", []):
+            name = workload.get("name")
+            if not name or name in workload_metadata:
+                continue
+            workload_order.append(name)
+            workload_metadata[name] = {
+                "category": workload.get("category"),
+                "description": workload.get("description"),
+            }
+
+    runtime_details: List[Dict[str, object]] = []
+    for payload in payloads:
+        metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+        implementation = metadata.get("python_implementation", "unknown")
+        version = metadata.get("python_version", "unknown")
+        runtime_entry: Dict[str, object] = {
+            "python_implementation": implementation,
+            "python_version": version,
+        }
+        for key in ("tasks", "workers", "gil_disabled"):
+            value = metadata.get(key)
+            if value is not None:
+                runtime_entry[key] = value
+        runtime_details.append(runtime_entry)
+
+    workloads: List[Dict[str, object]] = []
+    for workload_name in workload_order:
+        metadata = workload_metadata.get(workload_name, {})
+        workload_results: List[Dict[str, object]] = []
+        for payload, runtime_info in zip(payloads, runtime_details):
+            workload_payload = next(
+                (
+                    workload
+                    for workload in payload.get("workloads", [])
+                    if workload.get("name") == workload_name
+                ),
+                None,
+            )
+            entry: Dict[str, object] = {
+                "python_implementation": runtime_info.get(
+                    "python_implementation", "unknown"
+                ),
+                "python_version": runtime_info.get("python_version", "unknown"),
+            }
+            for key in ("tasks", "workers", "gil_disabled"):
+                if key in runtime_info:
+                    entry[key] = runtime_info[key]
+
+            strategies: List[Dict[str, object]] = []
+            if workload_payload is not None:
+                for strategy in workload_payload.get("strategies", []):
+                    strategies.append(
+                        {
+                            "name": strategy.get("name"),
+                            "supported": bool(strategy.get("supported")),
+                            "duration": strategy.get("duration"),
+                            "tasks_per_second": strategy.get("tasks_per_second"),
+                            "speedup_vs_sequential": strategy.get(
+                                "speedup_vs_sequential"
+                            ),
+                            "reason": strategy.get("reason"),
+                        }
+                    )
+            entry["strategies"] = strategies
+            workload_results.append(entry)
+
+        workloads.append(
+            {
+                "name": workload_name,
+                "category": metadata.get("category"),
+                "description": metadata.get("description"),
+                "results": workload_results,
+            }
+        )
+
+    versions = [entry.get("python_version", "unknown") for entry in runtime_details]
+    implementations = [
+        entry.get("python_implementation", "unknown") for entry in runtime_details
+    ]
+
+    return {
+        "suite": "concurrency",
+        "python_versions": versions,
+        "python_implementations": implementations,
+        "python_runtimes": runtime_details,
+        "workloads": workloads,
+    }
+
+
+def _format_concurrency_summary(summary: dict) -> str:
+    lines = ["Aggregate concurrency benchmark results:"]
+    workloads = summary.get("workloads", [])
+    for workload in workloads:
+        name = workload.get("name", "unknown workload")
+        category = workload.get("category")
+        header = f"- {name}"
+        if category:
+            header += f" [{category}]"
+        lines.append(header)
+        description = workload.get("description")
+        if description:
+            lines.append(f"    {description}")
+        for entry in workload.get("results", []):
+            implementation = entry.get("python_implementation", "unknown")
+            version = entry.get("python_version", "unknown")
+            runtime_label = f"    {implementation} {version}"
+            if entry.get("gil_disabled") is True:
+                runtime_label += " [GIL disabled]"
+            elif entry.get("gil_disabled") is False:
+                runtime_label += " [GIL enabled]"
+            tasks = entry.get("tasks")
+            workers = entry.get("workers")
+            meta_parts = []
+            if isinstance(tasks, int):
+                meta_parts.append(f"{tasks} tasks")
+            if isinstance(workers, int):
+                meta_parts.append(f"{workers} workers")
+            if meta_parts:
+                runtime_label += f" ({', '.join(meta_parts)})"
+            lines.append(runtime_label + ":")
+            strategies = entry.get("strategies", [])
+            if not strategies:
+                lines.append("        (no strategy data)")
+                continue
+            for strategy in strategies:
+                name = strategy.get("name", "unknown")
+                if not strategy.get("supported", False):
+                    reason = strategy.get("reason")
+                    if reason:
+                        lines.append(f"        {name}: unsupported ({reason})")
+                    else:
+                        lines.append(f"        {name}: unsupported")
+                    continue
+                duration = strategy.get("duration")
+                tasks_per_second = strategy.get("tasks_per_second")
+                speedup = strategy.get("speedup_vs_sequential")
+                parts: List[str] = []
+                if isinstance(duration, (int, float)):
+                    parts.append(f"{duration:.6f}s total")
+                if isinstance(tasks_per_second, (int, float)):
+                    parts.append(f"{tasks_per_second:.2f} tasks/s")
+                if isinstance(speedup, (int, float)):
+                    parts.append(f"{speedup:.2f}x vs sequential")
+                if parts:
+                    lines.append(f"        {name}: " + ", ".join(parts))
+                else:
+                    lines.append(f"        {name}: supported (no metrics recorded)")
+    if not workloads:
+        lines.append("(no concurrency benchmark workloads found)")
     return "\n".join(lines)
 
 

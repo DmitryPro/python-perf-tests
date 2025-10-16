@@ -438,3 +438,136 @@ def test_baseline_mean_prefers_standard_gil_build() -> None:
 
 def test_summarize_results_handles_missing(tmp_path: Path) -> None:
     assert docker_runner.summarize_results(tmp_path) is None
+
+
+def test_summarize_concurrency_results(tmp_path: Path) -> None:
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    payload = {
+        "metadata": {
+            "python_implementation": "CPython",
+            "python_version": "3.14.0",
+            "tasks": 12,
+            "workers": 3,
+            "gil_disabled": False,
+        },
+        "workloads": [
+            {
+                "name": "cpu_bound_fibonacci",
+                "category": "cpu",
+                "description": "CPU-bound workload",
+                "strategies": [
+                    {
+                        "name": "sequential",
+                        "supported": True,
+                        "duration": 1.0,
+                        "tasks_per_second": 12.0,
+                        "speedup_vs_sequential": 1.0,
+                    },
+                    {
+                        "name": "threading",
+                        "supported": True,
+                        "duration": 0.5,
+                        "tasks_per_second": 24.0,
+                        "speedup_vs_sequential": 2.0,
+                    },
+                    {
+                        "name": "process",
+                        "supported": False,
+                        "duration": None,
+                        "tasks_per_second": None,
+                        "speedup_vs_sequential": None,
+                        "reason": "not available",
+                    },
+                ],
+            }
+        ],
+    }
+    payload2 = {
+        "metadata": {
+            "python_implementation": "CPython",
+            "python_version": "3.14.0",
+            "tasks": 12,
+            "workers": 3,
+            "gil_disabled": True,
+        },
+        "workloads": [
+            {
+                "name": "cpu_bound_fibonacci",
+                "category": "cpu",
+                "description": "CPU-bound workload",
+                "strategies": [
+                    {
+                        "name": "sequential",
+                        "supported": True,
+                        "duration": 0.8,
+                        "tasks_per_second": 15.0,
+                        "speedup_vs_sequential": 1.0,
+                    },
+                    {
+                        "name": "threading",
+                        "supported": True,
+                        "duration": 0.4,
+                        "tasks_per_second": 30.0,
+                        "speedup_vs_sequential": 2.0,
+                    },
+                ],
+            }
+        ],
+    }
+    (results_dir / "concurrency-cpython-3.14.0.json").write_text(json.dumps(payload))
+    (results_dir / "concurrency-cpython-3.14.0-nogil.json").write_text(
+        json.dumps(payload2)
+    )
+
+    summary_text = docker_runner.summarize_results(results_dir, suite="concurrency")
+    assert summary_text is not None
+    assert "Aggregate concurrency benchmark results" in summary_text
+    assert "cpu_bound_fibonacci" in summary_text
+    assert "GIL disabled" in summary_text
+    summary_payload = json.loads((results_dir / "summary.json").read_text())
+    assert summary_payload["suite"] == "concurrency"
+    assert summary_payload["workloads"][0]["results"][0]["strategies"]
+    assert summary_payload["workloads"][0]["results"][1]["strategies"][0][
+        "duration"
+    ] == pytest.approx(0.8)
+
+
+def test_main_uses_suite_specific_results_dirs(
+    monkeypatch: pytest.MonkeyPatch, docker_tree: Path
+) -> None:
+    captured: list[Path] = []
+
+    def fake_execute(*, results_dir: Path, **kwargs):
+        captured.append(results_dir)
+        return []
+
+    monkeypatch.setattr(docker_runner, "execute", fake_execute)
+
+    exit_code_micro = docker_runner.main(
+        [
+            "--docker-root",
+            str(docker_tree),
+            "--context",
+            str(docker_tree.parent),
+            "--skip-build",
+            "--skip-run",
+        ]
+    )
+    exit_code_concurrency = docker_runner.main(
+        [
+            "--docker-root",
+            str(docker_tree),
+            "--context",
+            str(docker_tree.parent),
+            "--skip-build",
+            "--skip-run",
+            "--suite",
+            "concurrency",
+        ]
+    )
+
+    assert exit_code_micro == 0
+    assert exit_code_concurrency == 0
+    assert captured[0] == docker_runner.REPO_ROOT / "results" / "micro"
+    assert captured[1] == docker_runner.REPO_ROOT / "results" / "concurrency"

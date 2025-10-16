@@ -253,7 +253,7 @@ def run_concurrency_benchmarks(
         "python_implementation": platform.python_implementation(),
         "tasks": tasks,
         "workers": workers,
-        "gil_disabled": _detect_gil_disabled(),
+        "gil_disabled": not sys._is_gil_enabled(),
     }
 
     runner_map = _runner_mapping()
