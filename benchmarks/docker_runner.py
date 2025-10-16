@@ -164,6 +164,9 @@ def execute(
     aggregate: bool = True,
     iterations: int | None = None,
     repeat: int | None = None,
+    suite: str = "micro",
+    tasks: int | None = None,
+    workers: int | None = None,
 ) -> List[DockerTarget]:
     """Build and run all Docker images.
 
@@ -179,22 +182,31 @@ def execute(
             _reset_results_dir(results_dir)
 
     if run_cmd is not None:
-        resolved_run_cmd = run_cmd
-    elif iterations is not None or repeat is not None:
-        resolved_run_cmd = _build_benchmark_command(iterations, repeat)
+        command_builder = lambda target: [list(run_cmd)]
+    elif suite == "concurrency":
+        command_builder = lambda target: _build_concurrency_commands(
+            tasks, workers, target.version
+        )
+    elif suite == "micro":
+        base_command = _build_benchmark_command(iterations, repeat)
+
+        def command_builder(target: DockerTarget) -> List[List[str]]:
+            return [list(base_command)]
+
     else:
-        resolved_run_cmd = None
+        raise DockerRunnerError(f"Unsupported benchmark suite '{suite}'")
 
     for target in targets:
         if not skip_build:
             build_image(target, context=context, dry_run=dry_run)
         if not skip_run:
-            run_container(
-                target,
-                dry_run=dry_run,
-                run_cmd=resolved_run_cmd,
-                results_dir=results_dir,
-            )
+            for command in command_builder(target):
+                run_container(
+                    target,
+                    dry_run=dry_run,
+                    run_cmd=command,
+                    results_dir=results_dir,
+                )
 
     if (
         not skip_run
@@ -210,6 +222,12 @@ def execute(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--suite",
+        choices=("micro", "concurrency"),
+        default="micro",
+        help="Benchmark suite to execute inside each container",
+    )
     parser.add_argument(
         "--docker-root",
         type=Path,
@@ -269,6 +287,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Override repeats passed to benchmarks inside containers",
     )
+    parser.add_argument(
+        "--tasks",
+        type=int,
+        default=None,
+        help="Override concurrency benchmark tasks per workload",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Override concurrency benchmark worker count",
+    )
     return parser.parse_args(argv)
 
 
@@ -276,8 +306,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     run_cmd = shlex.split(args.run_cmd) if args.run_cmd else None
 
-    if run_cmd is not None and (args.iterations is not None or args.repeat is not None):
-        print("Error: --run-cmd cannot be combined with --iterations/--repeat overrides")
+    parameter_overrides = (
+        args.iterations,
+        args.repeat,
+        args.tasks,
+        args.workers,
+    )
+
+    if run_cmd is not None and any(value is not None for value in parameter_overrides):
+        print(
+            "Error: --run-cmd cannot be combined with benchmark parameter overrides"
+        )
+        return 1
+
+    if args.suite == "micro" and (
+        args.tasks is not None or args.workers is not None
+    ):
+        print("Error: --tasks/--workers overrides require --suite concurrency")
+        return 1
+
+    if args.suite == "concurrency" and (
+        args.iterations is not None or args.repeat is not None
+    ):
+        print("Error: --iterations/--repeat overrides are unavailable for the concurrency suite")
         return 1
 
     try:
@@ -292,6 +343,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             aggregate=not args.no_aggregate,
             iterations=args.iterations,
             repeat=args.repeat,
+            suite=args.suite,
+            tasks=args.tasks,
+            workers=args.workers,
         )
     except (DockerRunnerError, subprocess.CalledProcessError) as exc:
         print(f"Error: {exc}")
@@ -308,6 +362,30 @@ def _build_benchmark_command(
     if repeat is not None:
         command.extend(["--repeat", str(repeat)])
     return command
+
+
+def _build_concurrency_commands(
+    tasks: int | None, workers: int | None, python_version: str
+) -> List[List[str]]:
+    options: List[str] = []
+    if tasks is not None:
+        options.extend(["--tasks", str(tasks)])
+    if workers is not None:
+        options.extend(["--workers", str(workers)])
+
+    commands = []
+
+    if python_version.startswith("3.14"):
+        commands.append(
+            [
+                "python",
+                "-m",
+                "benchmarks.concurrency",
+                *options,
+            ]
+        )
+
+    return commands
 
 
 def summarize_results(results_dir: Path) -> str | None:

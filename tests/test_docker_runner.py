@@ -39,7 +39,7 @@ def test_execute_runs_build_and_run(monkeypatch: pytest.MonkeyPatch, docker_tree
         aggregate=False,
     )
 
-    run_commands = [cmd for cmd, _ in commands if cmd[:3] == ("docker", "run", "--rm")]
+    run_commands = [list(cmd) for cmd, _ in commands if cmd[:3] == ("docker", "run", "--rm")]
     assert len(run_commands) == 2
     assert {
         next(value for value in cmd if value.startswith("python-perf:"))
@@ -145,7 +145,7 @@ def test_main_supports_iteration_overrides(
     commands = []
 
     def fake_run(command, dry_run=False):
-        commands.append((command, dry_run))
+        commands.append((tuple(command), dry_run))
 
     monkeypatch.setattr(docker_runner, "run_command", fake_run)
 
@@ -166,7 +166,7 @@ def test_main_supports_iteration_overrides(
     )
 
     assert exit_code == 0
-    run_commands = [cmd for cmd, _ in commands if cmd[:3] == ["docker", "run", "--rm"]]
+    run_commands = [list(cmd) for cmd, _ in commands if cmd[:3] == ("docker", "run", "--rm")]
     assert len(run_commands) == 2
     assert run_commands[0][-7:] == [
         "python",
@@ -180,6 +180,80 @@ def test_main_supports_iteration_overrides(
     # Check both overrides are applied
     assert "--iterations" in run_commands[0]
     assert "--repeat" in run_commands[0]
+
+
+def test_main_supports_concurrency_suite(
+    monkeypatch: pytest.MonkeyPatch, docker_tree: Path
+) -> None:
+    commands = []
+
+    def fake_run(command, dry_run=False):
+        commands.append((command, dry_run))
+
+    monkeypatch.setattr(docker_runner, "run_command", fake_run)
+
+    exit_code = docker_runner.main(
+        [
+            "--docker-root",
+            str(docker_tree),
+            "--context",
+            str(docker_tree.parent),
+            "--dry-run",
+            "--suite",
+            "concurrency",
+            "--tasks",
+            "12",
+            "--workers",
+            "3",
+            "--results-dir",
+            str(docker_tree.parent / "results"),
+        ]
+    )
+
+    assert exit_code == 0
+    run_commands = [cmd for cmd, _ in commands if cmd[:3] == ["docker", "run", "--rm"]]
+    assert len(run_commands) == 2
+    assert run_commands[0][-7:] == [
+        "python",
+        "-m",
+        "benchmarks.concurrency",
+        "--tasks",
+        "12",
+        "--workers",
+        "3",
+    ]
+
+
+def test_execute_runs_disable_gil_variant_for_python_314(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = []
+
+    def fake_run(command, dry_run=False):
+        commands.append((command, dry_run))
+
+    docker_root = tmp_path / "docker"
+    context = tmp_path
+    docker_root.mkdir()
+    target_dir = docker_root / "py3.14"
+    target_dir.mkdir()
+    (target_dir / "Dockerfile").write_text("FROM scratch\n")
+
+    monkeypatch.setattr(docker_runner, "run_command", fake_run)
+
+    docker_runner.execute(
+        context=context,
+        docker_root=docker_root,
+        dry_run=True,
+        aggregate=False,
+        suite="concurrency",
+    )
+
+    run_commands = [cmd for cmd, _ in commands if cmd[:3] == ["docker", "run", "--rm"]]
+    assert len(run_commands) == 2
+    regular, nogil = run_commands
+    assert "--disable-gil" not in regular
+    assert "--disable-gil" in nogil
 
 
 def test_main_rejects_conflicting_command(monkeypatch: pytest.MonkeyPatch, docker_tree: Path) -> None:
@@ -201,6 +275,60 @@ def test_main_rejects_conflicting_command(monkeypatch: pytest.MonkeyPatch, docke
             "python -m pytest -q",
             "--iterations",
             "10",
+        ]
+    )
+
+    assert exit_code == 1
+    assert commands == []
+
+
+def test_main_rejects_invalid_concurrency_overrides(
+    monkeypatch: pytest.MonkeyPatch, docker_tree: Path
+) -> None:
+    commands = []
+
+    def fake_run(command, dry_run=False):
+        commands.append(command)
+
+    monkeypatch.setattr(docker_runner, "run_command", fake_run)
+
+    exit_code = docker_runner.main(
+        [
+            "--docker-root",
+            str(docker_tree),
+            "--context",
+            str(docker_tree.parent),
+            "--dry-run",
+            "--suite",
+            "concurrency",
+            "--iterations",
+            "10",
+        ]
+    )
+
+    assert exit_code == 1
+    assert commands == []
+
+
+def test_main_rejects_tasks_without_concurrency(
+    monkeypatch: pytest.MonkeyPatch, docker_tree: Path
+) -> None:
+    commands = []
+
+    def fake_run(command, dry_run=False):
+        commands.append(command)
+
+    monkeypatch.setattr(docker_runner, "run_command", fake_run)
+
+    exit_code = docker_runner.main(
+        [
+            "--docker-root",
+            str(docker_tree),
+            "--context",
+            str(docker_tree.parent),
+            "--dry-run",
+            "--tasks",
+            "5",
         ]
     )
 
